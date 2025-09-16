@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   BirthInfo,
   CoordinateInput,
+  SunHourUnit,
   TimeConversionResult,
 } from "./lib/time-converter";
 
@@ -32,6 +33,13 @@ export default function Home() {
     },
   });
 
+  const [sunHourUnit, setSunHourUnit] = useState<SunHourUnit>({
+    nari: 0,
+    vizana: 0,
+    khara: 0,
+  });
+
+  const [useSunHour, setUseSunHour] = useState(false);
   const [result, setResult] = useState<TimeConversionResult | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -43,7 +51,11 @@ export default function Home() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ birthInfo, coordInput }),
+        body: JSON.stringify({
+          birthInfo,
+          coordInput,
+          sunHourUnit: useSunHour ? sunHourUnit : undefined,
+        }),
       });
 
       if (response.ok) {
@@ -67,7 +79,7 @@ export default function Home() {
         Myanmar Vedic Astrology Calculator
       </h1>
 
-      <div className="grid lg:grid-cols-3 gap-8">
+      <div className="grid lg:grid-cols-4 gap-6">
         {/* Birth Information Form */}
         <div className="bg-white p-6 rounded-lg shadow-lg">
           <h2 className="text-xl font-semibold mb-4">Birth Information</h2>
@@ -402,6 +414,100 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Sun Hour Unit Form */}
+        <div className="bg-white p-6 rounded-lg shadow-lg">
+          <h2 className="text-xl font-semibold mb-4">Sun Hour Unit</h2>
+
+          <div className="space-y-4">
+            <div>
+              <label className="flex items-center mb-4">
+                <input
+                  type="checkbox"
+                  checked={useSunHour}
+                  onChange={(e) => setUseSunHour(e.target.checked)}
+                  className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <span className="text-sm font-medium">Add Sun Hour Unit</span>
+              </label>
+            </div>
+
+            {useSunHour && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Nari</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={sunHourUnit.nari}
+                    onChange={(e) =>
+                      setSunHourUnit({
+                        ...sunHourUnit,
+                        nari: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0-59"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Vizana
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={sunHourUnit.vizana}
+                    onChange={(e) =>
+                      setSunHourUnit({
+                        ...sunHourUnit,
+                        vizana: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0-59"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Khara
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={sunHourUnit.khara}
+                    onChange={(e) =>
+                      setSunHourUnit({
+                        ...sunHourUnit,
+                        khara: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0-59"
+                  />
+                </div>
+
+                <div className="mt-4 p-3 bg-yellow-50 rounded border border-yellow-200">
+                  <p className="text-sm text-yellow-800">
+                    <strong>Current Sun Hour:</strong>
+                    <br />
+                    {sunHourUnit.nari} Nari {sunHourUnit.vizana} Vizana{" "}
+                    {sunHourUnit.khara} Khara
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!useSunHour && (
+              <div className="text-center text-gray-500 py-8">
+                <p>Check the box above to add Sun Hour Unit calculations</p>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Results */}
         <div className="bg-white p-6 rounded-lg shadow-lg">
           <h2 className="text-xl font-semibold mb-4">Results</h2>
@@ -449,6 +555,31 @@ export default function Home() {
                   Vizana {result.ancientTime.khara} Khara
                 </p>
               </div>
+
+              {result.sunHourUnit && (
+                <div>
+                  <h3 className="font-semibold mb-2">Sun Hour Unit</h3>
+                  <p className="text-lg bg-yellow-50 p-2 rounded border border-yellow-200">
+                    {result.sunHourUnit.nari} Nari {result.sunHourUnit.vizana}{" "}
+                    Vizana {result.sunHourUnit.khara} Khara
+                  </p>
+                </div>
+              )}
+
+              {result.finalTime && (
+                <div>
+                  <h3 className="font-semibold mb-2 text-green-700">
+                    Final Time (Ancient + Sun Hour)
+                  </h3>
+                  <p className="text-xl text-green-700 font-bold bg-green-50 p-3 rounded border border-green-200">
+                    {result.finalTime.nari} Nari {result.finalTime.vizana}{" "}
+                    Vizana {result.finalTime.khara} Khara
+                  </p>
+                  <p className="text-xs text-green-600 mt-1">
+                    * Nari overflow handled (subtracted 60 if ≥ 60)
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

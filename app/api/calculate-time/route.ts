@@ -3,11 +3,11 @@ import { MyanmarVedicTimeConverter } from "../../lib/time-converter";
 
 export async function POST(request: NextRequest) {
   try {
-    const { birthInfo, coordInput } = await request.json();
+    const { birthInfo, coordInput, sunHourUnit } = await request.json();
 
     const converter = new MyanmarVedicTimeConverter();
     const location = converter.convertCoordinates(coordInput);
-    const result = converter.fullConversion(birthInfo, location);
+    const result = converter.fullConversion(birthInfo, location, sunHourUnit);
 
     return NextResponse.json(result);
   } catch (error) {

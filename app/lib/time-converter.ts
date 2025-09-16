@@ -50,11 +50,19 @@ interface LMTOffset {
   direction: "ahead" | "behind";
 }
 
+interface SunHourUnit {
+  nari: number;
+  vizana: number;
+  khara: number;
+}
+
 interface TimeConversionResult {
   originalMMT: string;
   lmtOffset: LMTOffset;
   machineTime: MachineTime;
   ancientTime: AncientBurmeseTime;
+  sunHourUnit?: SunHourUnit;
+  finalTime?: AncientBurmeseTime;
   description: string;
 }
 
@@ -224,15 +232,57 @@ export class MyanmarVedicTimeConverter {
   }
 
   /**
-   * Complete conversion process
+   * Add Sun Hour Unit to Ancient Burmese Time
+   */
+  addSunHourUnit(
+    ancientTime: AncientBurmeseTime,
+    sunHour: SunHourUnit
+  ): AncientBurmeseTime {
+    // Add the units starting from the smallest
+    let totalKhara = ancientTime.khara + sunHour.khara;
+    let totalVizana = ancientTime.vizana + sunHour.vizana;
+    let totalNari = ancientTime.nari + sunHour.nari;
+
+    // Handle Khara overflow (60 Khara = 1 Vizana)
+    if (totalKhara >= 60) {
+      totalVizana += Math.floor(totalKhara / 60);
+      totalKhara = totalKhara % 60;
+    }
+
+    // Handle Vizana overflow (60 Vizana = 1 Nari)
+    if (totalVizana >= 60) {
+      totalNari += Math.floor(totalVizana / 60);
+      totalVizana = totalVizana % 60;
+    }
+
+    // Handle Nari overflow (60 Nari = 1 day, subtract 60 if >= 60)
+    while (totalNari >= 60) {
+      totalNari -= 60;
+    }
+
+    return {
+      nari: totalNari,
+      vizana: totalVizana,
+      khara: totalKhara,
+    };
+  }
+
+  /**
+   * Complete conversion process with optional Sun Hour Unit
    */
   fullConversion(
     birthInfo: BirthInfo,
-    location: Location
+    location: Location,
+    sunHour?: SunHourUnit
   ): TimeConversionResult {
     const lmtOffset = this.getLMTOffset(location.longitude);
     const machineTime = this.convertToMachineTime(birthInfo, location);
     const ancientTime = this.convertToAncientBurmeseTime(machineTime);
+
+    let finalTime: AncientBurmeseTime | undefined;
+    if (sunHour) {
+      finalTime = this.addSunHourUnit(ancientTime, sunHour);
+    }
 
     const originalTimeStr = `${birthInfo.hour}:${birthInfo.minute
       .toString()
@@ -247,11 +297,18 @@ export class MyanmarVedicTimeConverter {
       .padStart(2, "0")}:${machineTime.seconds.toString().padStart(2, "0")}\n`;
     description += `Ancient Burmese Time: ${ancientTime.nari} Nari ${ancientTime.vizana} Vizana ${ancientTime.khara} Khara`;
 
+    if (sunHour && finalTime) {
+      description += `\nSun Hour Unit: ${sunHour.nari} Nari ${sunHour.vizana} Vizana ${sunHour.khara} Khara`;
+      description += `\nFinal Time (Ancient + Sun Hour): ${finalTime.nari} Nari ${finalTime.vizana} Vizana ${finalTime.khara} Khara`;
+    }
+
     return {
       originalMMT: originalTimeStr,
       lmtOffset: lmtOffset,
       machineTime: machineTime,
       ancientTime: ancientTime,
+      sunHourUnit: sunHour,
+      finalTime: finalTime,
       description: description,
     };
   }
@@ -263,6 +320,7 @@ export type {
   Location,
   MachineTime,
   AncientBurmeseTime,
+  SunHourUnit,
   LMTOffset,
   TimeConversionResult,
 };
