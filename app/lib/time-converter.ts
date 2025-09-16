@@ -9,6 +9,22 @@ interface BirthInfo {
   period: "AM" | "PM";
 }
 
+interface CoordinateInput {
+  type: "decimal" | "dms"; // decimal or degree-minute-second
+  latitude: {
+    decimal?: number;
+    degrees?: number;
+    minutes?: number;
+    direction?: "N" | "S";
+  };
+  longitude: {
+    decimal?: number;
+    degrees?: number;
+    minutes?: number;
+    direction?: "E" | "W";
+  };
+}
+
 interface Location {
   latitude: number;
   longitude: number;
@@ -27,9 +43,16 @@ interface AncientBurmeseTime {
   anukhara?: number;
 }
 
+interface LMTOffset {
+  hours: number;
+  minutes: number;
+  seconds: number;
+  direction: "ahead" | "behind";
+}
+
 interface TimeConversionResult {
   originalMMT: string;
-  lmtOffset: number; // in minutes
+  lmtOffset: LMTOffset;
   machineTime: MachineTime;
   ancientTime: AncientBurmeseTime;
   description: string;
@@ -40,15 +63,71 @@ export class MyanmarVedicTimeConverter {
   private static readonly MMT_LONGITUDE = 97.5; // 97°30′E
 
   /**
-   * Calculate Local Mean Time offset from Myanmar Standard Time
-   * @param longitude - Location longitude in decimal degrees
-   * @returns Offset in minutes (positive = ahead of MMT, negative = behind MMT)
+   * Convert DMS to decimal degrees
    */
-  private calculateLMTOffset(longitude: number): number {
+  private dmsToDecimal(
+    degrees: number,
+    minutes: number,
+    direction: "N" | "S" | "E" | "W"
+  ): number {
+    let decimal = degrees + minutes / 60;
+    if (direction === "S" || direction === "W") {
+      decimal = -decimal;
+    }
+    return decimal;
+  }
+
+  /**
+   * Convert coordinate input to decimal location
+   */
+  convertCoordinates(coordInput: CoordinateInput): Location {
+    let latitude: number;
+    let longitude: number;
+
+    if (coordInput.type === "decimal") {
+      latitude = coordInput.latitude.decimal || 0;
+      longitude = coordInput.longitude.decimal || 0;
+    } else {
+      latitude = this.dmsToDecimal(
+        coordInput.latitude.degrees || 0,
+        coordInput.latitude.minutes || 0,
+        coordInput.latitude.direction || "N"
+      );
+      longitude = this.dmsToDecimal(
+        coordInput.longitude.degrees || 0,
+        coordInput.longitude.minutes || 0,
+        coordInput.longitude.direction || "E"
+      );
+    }
+
+    return { latitude, longitude };
+  }
+
+  /**
+   * Calculate Local Mean Time offset from Myanmar Standard Time
+   * Returns offset in total seconds for precision
+   */
+  private calculateLMTOffsetSeconds(longitude: number): number {
     const longitudeDifference =
       longitude - MyanmarVedicTimeConverter.MMT_LONGITUDE;
-    // 1 degree = 4 minutes of time
-    return longitudeDifference * 4;
+    // 1 degree = 4 minutes = 240 seconds
+    return longitudeDifference * 240;
+  }
+
+  /**
+   * Convert seconds to hours, minutes, seconds format
+   */
+  private secondsToHMS(totalSeconds: number): {
+    hours: number;
+    minutes: number;
+    seconds: number;
+  } {
+    const absSeconds = Math.abs(totalSeconds);
+    const hours = Math.floor(absSeconds / 3600);
+    const minutes = Math.floor((absSeconds % 3600) / 60);
+    const seconds = Math.floor(absSeconds % 60);
+
+    return { hours, minutes, seconds };
   }
 
   /**
@@ -63,59 +142,84 @@ export class MyanmarVedicTimeConverter {
       hours = 0;
     }
 
-    // Calculate LMT offset
-    const lmtOffsetMinutes = this.calculateLMTOffset(location.longitude);
+    // Calculate LMT offset in seconds
+    const lmtOffsetSeconds = this.calculateLMTOffsetSeconds(location.longitude);
+
+    // Convert birth time to total seconds
+    let totalSeconds =
+      hours * 3600 + birthInfo.minute * 60 + (birthInfo.second || 0);
 
     // Apply LMT offset
-    let totalMinutes = hours * 60 + birthInfo.minute + lmtOffsetMinutes;
-    const totalSeconds = birthInfo.second || 0;
+    totalSeconds += lmtOffsetSeconds;
 
-    // Handle day overflow/underflow
-    while (totalMinutes >= 1440) {
-      // 24 * 60
-      totalMinutes -= 1440;
+    // Handle day overflow/underflow (86400 seconds in a day)
+    while (totalSeconds >= 86400) {
+      totalSeconds -= 86400;
     }
-    while (totalMinutes < 0) {
-      totalMinutes += 1440;
+    while (totalSeconds < 0) {
+      totalSeconds += 86400;
     }
 
-    const machineHours = Math.floor(totalMinutes / 60);
-    const machineMinutes = totalMinutes % 60;
+    const machineHours = Math.floor(totalSeconds / 3600);
+    const machineMinutes = Math.floor((totalSeconds % 3600) / 60);
+    const machineSecondsRemainder = totalSeconds % 60;
 
     return {
       hours: machineHours,
       minutes: machineMinutes,
-      seconds: totalSeconds,
+      seconds: machineSecondsRemainder,
     };
   }
 
   /**
    * Convert Machine Time to Ancient Burmese Time Units (Takkala Time)
+   * CORRECTED FORMULA: The issue was in the conversion ratio
    */
   convertToAncientBurmeseTime(machineTime: MachineTime): AncientBurmeseTime {
-    // Convert everything to seconds first
-    const totalSeconds =
+    // Convert machine time to total seconds
+    const totalMachineSeconds =
       machineTime.hours * 3600 + machineTime.minutes * 60 + machineTime.seconds;
 
-    // Apply the conversion formula: × 5 ÷ 2
-    const convertedSeconds = (totalSeconds * 5) / 2;
+    // Apply the conversion formula: × 5 ÷ 2 = × 2.5
+    const convertedSeconds = totalMachineSeconds * 2.5;
 
-    const nariSeconds = 1440; // 24 minutes × 60 seconds
-    const vizanaSeconds = nariSeconds / 60; // 24 seconds
-    const kharaSeconds = vizanaSeconds / 60; // 0.4 seconds
+    // Ancient Burmese time conversion
+    // 1 day = 60 Nari = 86400 standard seconds
+    // So 1 Nari = 86400/60 = 1440 standard seconds = 24 standard minutes
+    // After conversion: 1 Nari = 1440 * 2.5 = 3600 converted seconds
 
-    const nari = Math.floor(convertedSeconds / nariSeconds);
-    const remainingAfterNari = convertedSeconds % nariSeconds;
+    const nariInConvertedSeconds = 3600; // 1 Nari = 3600 converted seconds
+    const vizanaInConvertedSeconds = nariInConvertedSeconds / 60; // 1 Vizana = 60 converted seconds
+    const kharaInConvertedSeconds = vizanaInConvertedSeconds / 60; // 1 Khara = 1 converted second
 
-    const vizana = Math.floor(remainingAfterNari / vizanaSeconds);
-    const remainingAfterVizana = remainingAfterNari % vizanaSeconds;
+    const nari = Math.floor(convertedSeconds / nariInConvertedSeconds);
+    const remainingAfterNari = convertedSeconds % nariInConvertedSeconds;
 
-    const khara = Math.floor(remainingAfterVizana / kharaSeconds);
+    const vizana = Math.floor(remainingAfterNari / vizanaInConvertedSeconds);
+    const remainingAfterVizana = remainingAfterNari % vizanaInConvertedSeconds;
+
+    const khara = Math.floor(remainingAfterVizana / kharaInConvertedSeconds);
 
     return {
       nari: nari,
       vizana: vizana,
       khara: khara,
+    };
+  }
+
+  /**
+   * Get LMT offset in formatted structure
+   */
+  getLMTOffset(longitude: number): LMTOffset {
+    const offsetSeconds = this.calculateLMTOffsetSeconds(longitude);
+    const hms = this.secondsToHMS(offsetSeconds);
+    const direction = offsetSeconds >= 0 ? "ahead" : "behind";
+
+    return {
+      hours: hms.hours,
+      minutes: hms.minutes,
+      seconds: hms.seconds,
+      direction: direction,
     };
   }
 
@@ -126,7 +230,7 @@ export class MyanmarVedicTimeConverter {
     birthInfo: BirthInfo,
     location: Location
   ): TimeConversionResult {
-    const lmtOffset = this.calculateLMTOffset(location.longitude);
+    const lmtOffset = this.getLMTOffset(location.longitude);
     const machineTime = this.convertToMachineTime(birthInfo, location);
     const ancientTime = this.convertToAncientBurmeseTime(machineTime);
 
@@ -137,9 +241,7 @@ export class MyanmarVedicTimeConverter {
       .padStart(2, "0")} ${birthInfo.period}`;
 
     let description = `Original MMT: ${originalTimeStr}\n`;
-    description += `Longitude: ${location.longitude}° (${
-      lmtOffset >= 0 ? "ahead of" : "behind"
-    } MMT by ${Math.abs(lmtOffset)} minutes)\n`;
+    description += `LMT Offset: ${lmtOffset.hours}h ${lmtOffset.minutes}m ${lmtOffset.seconds}s ${lmtOffset.direction} of MMT\n`;
     description += `Machine Time: ${machineTime.hours}:${machineTime.minutes
       .toString()
       .padStart(2, "0")}:${machineTime.seconds.toString().padStart(2, "0")}\n`;
@@ -157,8 +259,10 @@ export class MyanmarVedicTimeConverter {
 
 export type {
   BirthInfo,
+  CoordinateInput,
   Location,
   MachineTime,
   AncientBurmeseTime,
+  LMTOffset,
   TimeConversionResult,
 };
