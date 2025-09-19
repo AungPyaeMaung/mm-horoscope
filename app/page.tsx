@@ -1,4 +1,5 @@
 // app/page.tsx (Simplified with Components)
+// app/page.tsx (Updated with Sequential Lag Calculator)
 "use client";
 
 import { useState } from "react";
@@ -7,13 +8,14 @@ import {
   CoordinateInput,
   SunHourUnit,
   TimeConversionResult,
-} from "./lib/time-converter";
+} from "./lib/types";
 
 // Import components
 import BirthInfoForm from "./components/BirthInfoForm";
 import LocationForm from "./components/LocationForm";
 import SunHourForm from "./components/SunHourForm";
 import ResultsDisplay from "./components/ResultsDisplay";
+import SequentialLagCalculator from "./components/SequentialLagCalculator";
 
 export default function Home() {
   // State management
@@ -62,6 +64,8 @@ export default function Home() {
       if (response.ok) {
         const data = await response.json();
         setResult(data);
+        // Reset lag calculation when new results come in
+        setShowLagCalculation(false);
       } else {
         alert("Error calculating time. Please check your inputs.");
       }
@@ -75,6 +79,11 @@ export default function Home() {
 
   const handleStartLagCalculation = () => {
     setShowLagCalculation(true);
+  };
+
+  const handleLagCalculationComplete = (lagResult: any) => {
+    console.log("Lag calculation completed:", lagResult);
+    // You can update the result state here if needed
   };
 
   return (
@@ -103,21 +112,12 @@ export default function Home() {
         />
       </div>
 
-      {/* Sequential Lag Calculation will be added as separate component */}
+      {/* Sequential Lag Calculation */}
       {showLagCalculation && result?.finalTime && (
-        <div className="mt-8 p-6 bg-purple-50 rounded-lg border border-purple-200">
-          <h2 className="text-xl font-semibold text-purple-800 mb-4">
-            Sequential Lag Calculation
-          </h2>
-          <p className="text-purple-700">
-            Sequential Lag calculation component will be implemented here...
-          </p>
-          <p className="text-sm text-purple-600 mt-2">
-            Starting with: {result.finalTime.nari} Nari{" "}
-            {result.finalTime.vizana} Vizana {result.finalTime.khara} Khara{" "}
-            {result.finalTime.anukhara || 0} Anukhara
-          </p>
-        </div>
+        <SequentialLagCalculator
+          finalTime={result.finalTime}
+          onCalculationComplete={handleLagCalculationComplete}
+        />
       )}
     </div>
   );
