@@ -1,3 +1,5 @@
+// app/lib/time-converter.ts
+
 // Types for the astrology app
 interface BirthInfo {
   date: number;
@@ -43,17 +45,48 @@ interface AncientBurmeseTime {
   anukhara?: number;
 }
 
+interface SunHourUnit {
+  nari: number;
+  vizana: number;
+  khara: number;
+  anukhara: number;
+}
+
+interface AstronomicalPosition {
+  rasi: number;
+  amsa: number;
+  litta: number;
+  vilitta: number;
+  anulitta: number;
+}
+
+interface LocalLagStage {
+  stage: number;
+  stageName: string;
+  inputValue: number;
+  inputUnit: string;
+  subtractTime: AncientBurmeseTime;
+  resultTime: AncientBurmeseTime;
+}
+
+interface AyanaAmsa {
+  amsa: number;
+  litta: number;
+}
+
+interface LagCalculationResult {
+  finalTime: AncientBurmeseTime;
+  localLagStages: LocalLagStage[];
+  asuddhaLag: AstronomicalPosition;
+  ayanaAmsa?: AyanaAmsa;
+  suddhaLag?: AstronomicalPosition;
+}
+
 interface LMTOffset {
   hours: number;
   minutes: number;
   seconds: number;
   direction: "ahead" | "behind";
-}
-
-interface SunHourUnit {
-  nari: number;
-  vizana: number;
-  khara: number;
 }
 
 interface TimeConversionResult {
@@ -63,6 +96,7 @@ interface TimeConversionResult {
   ancientTime: AncientBurmeseTime;
   sunHourUnit?: SunHourUnit;
   finalTime?: AncientBurmeseTime;
+  lagCalculation?: LagCalculationResult;
   description: string;
 }
 
@@ -212,6 +246,7 @@ export class MyanmarVedicTimeConverter {
       nari: nari,
       vizana: vizana,
       khara: khara,
+      anukhara: 0,
     };
   }
 
@@ -232,16 +267,23 @@ export class MyanmarVedicTimeConverter {
   }
 
   /**
-   * Add Sun Hour Unit to Ancient Burmese Time
+   * Add Sun Hour Unit to Ancient Burmese Time (now with 4 units)
    */
   addSunHourUnit(
     ancientTime: AncientBurmeseTime,
     sunHour: SunHourUnit
   ): AncientBurmeseTime {
     // Add the units starting from the smallest
+    let totalAnukhara = (ancientTime.anukhara || 0) + sunHour.anukhara;
     let totalKhara = ancientTime.khara + sunHour.khara;
     let totalVizana = ancientTime.vizana + sunHour.vizana;
     let totalNari = ancientTime.nari + sunHour.nari;
+
+    // Handle Anukhara overflow (60 Anukhara = 1 Khara)
+    if (totalAnukhara >= 60) {
+      totalKhara += Math.floor(totalAnukhara / 60);
+      totalAnukhara = totalAnukhara % 60;
+    }
 
     // Handle Khara overflow (60 Khara = 1 Vizana)
     if (totalKhara >= 60) {
@@ -264,16 +306,228 @@ export class MyanmarVedicTimeConverter {
       nari: totalNari,
       vizana: totalVizana,
       khara: totalKhara,
+      anukhara: totalAnukhara,
     };
   }
 
   /**
-   * Complete conversion process with optional Sun Hour Unit
+   * Subtract time units with proper borrowing
+   */
+  private subtractTime(
+    fromTime: AncientBurmeseTime,
+    subtractTime: AncientBurmeseTime
+  ): AncientBurmeseTime {
+    let nari = fromTime.nari;
+    let vizana = fromTime.vizana;
+    let khara = fromTime.khara;
+    let anukhara = fromTime.anukhara || 0;
+
+    let subNari = subtractTime.nari;
+    let subVizana = subtractTime.vizana;
+    let subKhara = subtractTime.khara;
+    let subAnukhara = subtractTime.anukhara || 0;
+
+    // Subtract Anukhara
+    if (anukhara < subAnukhara) {
+      khara -= 1;
+      anukhara += 60;
+    }
+    anukhara -= subAnukhara;
+
+    // Subtract Khara
+    if (khara < subKhara) {
+      vizana -= 1;
+      khara += 60;
+    }
+    khara -= subKhara;
+
+    // Subtract Vizana
+    if (vizana < subVizana) {
+      nari -= 1;
+      vizana += 60;
+    }
+    vizana -= subVizana;
+
+    // Subtract Nari
+    if (nari < subNari) {
+      // Borrow from next day
+      nari += 60;
+    }
+    nari -= subNari;
+
+    return {
+      nari: Math.max(0, nari),
+      vizana: Math.max(0, vizana),
+      khara: Math.max(0, khara),
+      anukhara: Math.max(0, anukhara),
+    };
+  }
+
+  /**
+   * Subtract Ayana Amsa from Asuddha Lag to get Suddha Lag
+   */
+  private subtractAyanaAmsa(
+    asuddhaLag: AstronomicalPosition,
+    ayanaAmsa: AyanaAmsa
+  ): AstronomicalPosition {
+    let rasi = asuddhaLag.rasi;
+    let amsa = asuddhaLag.amsa;
+    let litta = asuddhaLag.litta;
+    let vilitta = asuddhaLag.vilitta;
+    let anulitta = asuddhaLag.anulitta;
+
+    // Subtract Litta
+    if (litta < ayanaAmsa.litta) {
+      amsa -= 1;
+      litta += 60;
+    }
+    litta -= ayanaAmsa.litta;
+
+    // Subtract Amsa
+    if (amsa < ayanaAmsa.amsa) {
+      rasi -= 1;
+      amsa += 30; // 1 Rasi = 30 Amsa
+    }
+    amsa -= ayanaAmsa.amsa;
+
+    return {
+      rasi: Math.max(0, rasi),
+      amsa: Math.max(0, amsa),
+      litta,
+      vilitta,
+      anulitta,
+    };
+  }
+
+  /**
+   * Calculate Lag (Ascendant) with all stages
+   */
+  calculateLag(
+    finalTime: AncientBurmeseTime,
+    localLagData: any,
+    ayanaAmsa?: AyanaAmsa
+  ): LagCalculationResult {
+    const stages: LocalLagStage[] = [];
+    let currentTime = { ...finalTime };
+
+    // Stage 1: Rasi subtraction
+    const stage1SubtractTime = {
+      nari: localLagData.rasiNari,
+      vizana: localLagData.rasiVizana,
+      khara: 0,
+      anukhara: 0,
+    };
+    currentTime = this.subtractTime(currentTime, stage1SubtractTime);
+    stages.push({
+      stage: 1,
+      stageName: "Rasi",
+      inputValue: localLagData.rasi,
+      inputUnit: "Rasi",
+      subtractTime: stage1SubtractTime,
+      resultTime: { ...currentTime },
+    });
+
+    // Stage 2: Amsa subtraction
+    const stage2SubtractTime = {
+      nari: localLagData.amsaNari,
+      vizana: localLagData.amsaVizana,
+      khara: localLagData.amsaKhara,
+      anukhara: 0,
+    };
+    currentTime = this.subtractTime(currentTime, stage2SubtractTime);
+    stages.push({
+      stage: 2,
+      stageName: "Amsa",
+      inputValue: localLagData.amsa,
+      inputUnit: "Amsa",
+      subtractTime: stage2SubtractTime,
+      resultTime: { ...currentTime },
+    });
+
+    // Stage 3: Litta subtraction
+    const stage3SubtractTime = {
+      nari: 0,
+      vizana: localLagData.littaVizana,
+      khara: localLagData.littaKhara,
+      anukhara: localLagData.littaAnukhara,
+    };
+    currentTime = this.subtractTime(currentTime, stage3SubtractTime);
+    stages.push({
+      stage: 3,
+      stageName: "Litta",
+      inputValue: localLagData.litta,
+      inputUnit: "Litta",
+      subtractTime: stage3SubtractTime,
+      resultTime: { ...currentTime },
+    });
+
+    // Stage 4: Vilitta subtraction
+    const stage4SubtractTime = {
+      nari: 0,
+      vizana: 0,
+      khara: localLagData.vilittaKhara,
+      anukhara: localLagData.vilittaAnukhara,
+    };
+    currentTime = this.subtractTime(currentTime, stage4SubtractTime);
+    stages.push({
+      stage: 4,
+      stageName: "Vilitta",
+      inputValue: localLagData.vilitta,
+      inputUnit: "Vilitta",
+      subtractTime: stage4SubtractTime,
+      resultTime: { ...currentTime },
+    });
+
+    // Stage 5: Anulitta subtraction
+    const stage5SubtractTime = {
+      nari: 0,
+      vizana: 0,
+      khara: 0,
+      anukhara: localLagData.anulittaAnukhara,
+    };
+    currentTime = this.subtractTime(currentTime, stage5SubtractTime);
+    stages.push({
+      stage: 5,
+      stageName: "Anulitta",
+      inputValue: localLagData.anulitta,
+      inputUnit: "Anulitta",
+      subtractTime: stage5SubtractTime,
+      resultTime: { ...currentTime },
+    });
+
+    // Calculate Asuddha Lag
+    const asuddhaLag: AstronomicalPosition = {
+      rasi: localLagData.rasi,
+      amsa: localLagData.amsa,
+      litta: localLagData.litta,
+      vilitta: localLagData.vilitta,
+      anulitta: localLagData.anulitta,
+    };
+
+    // Calculate Suddha Lag if Ayana Amsa is provided
+    let suddhaLag: AstronomicalPosition | undefined;
+    if (ayanaAmsa) {
+      suddhaLag = this.subtractAyanaAmsa(asuddhaLag, ayanaAmsa);
+    }
+
+    return {
+      finalTime,
+      localLagStages: stages,
+      asuddhaLag,
+      ayanaAmsa,
+      suddhaLag,
+    };
+  }
+
+  /**
+   * Complete conversion process with optional Sun Hour Unit and Lag calculation
    */
   fullConversion(
     birthInfo: BirthInfo,
     location: Location,
-    sunHour?: SunHourUnit
+    sunHour?: SunHourUnit,
+    localLagData?: any,
+    ayanaAmsa?: AyanaAmsa
   ): TimeConversionResult {
     const lmtOffset = this.getLMTOffset(location.longitude);
     const machineTime = this.convertToMachineTime(birthInfo, location);
@@ -282,6 +536,11 @@ export class MyanmarVedicTimeConverter {
     let finalTime: AncientBurmeseTime | undefined;
     if (sunHour) {
       finalTime = this.addSunHourUnit(ancientTime, sunHour);
+    }
+
+    let lagCalculation: LagCalculationResult | undefined;
+    if (finalTime && localLagData) {
+      lagCalculation = this.calculateLag(finalTime, localLagData, ayanaAmsa);
     }
 
     const originalTimeStr = `${birthInfo.hour}:${birthInfo.minute
@@ -298,8 +557,19 @@ export class MyanmarVedicTimeConverter {
     description += `Ancient Burmese Time: ${ancientTime.nari} Nari ${ancientTime.vizana} Vizana ${ancientTime.khara} Khara`;
 
     if (sunHour && finalTime) {
-      description += `\nSun Hour Unit: ${sunHour.nari} Nari ${sunHour.vizana} Vizana ${sunHour.khara} Khara`;
-      description += `\nFinal Time (Ancient + Sun Hour): ${finalTime.nari} Nari ${finalTime.vizana} Vizana ${finalTime.khara} Khara`;
+      description += `\nSun Hour Unit: ${sunHour.nari} Nari ${sunHour.vizana} Vizana ${sunHour.khara} Khara ${sunHour.anukhara} Anukhara`;
+      description += `\nFinal Time (Ancient + Sun Hour): ${
+        finalTime.nari
+      } Nari ${finalTime.vizana} Vizana ${finalTime.khara} Khara ${
+        finalTime.anukhara || 0
+      } Anukhara`;
+    }
+
+    if (lagCalculation) {
+      description += `\nAsuddha Lag: ${lagCalculation.asuddhaLag.rasi} Rasi ${lagCalculation.asuddhaLag.amsa} Amsa ${lagCalculation.asuddhaLag.litta} Litta ${lagCalculation.asuddhaLag.vilitta} Vilitta ${lagCalculation.asuddhaLag.anulitta} Anulitta`;
+      if (lagCalculation.suddhaLag) {
+        description += `\nSuddha Lag: ${lagCalculation.suddhaLag.rasi} Rasi ${lagCalculation.suddhaLag.amsa} Amsa ${lagCalculation.suddhaLag.litta} Litta ${lagCalculation.suddhaLag.vilitta} Vilitta ${lagCalculation.suddhaLag.anulitta} Anulitta`;
+      }
     }
 
     return {
@@ -309,6 +579,7 @@ export class MyanmarVedicTimeConverter {
       ancientTime: ancientTime,
       sunHourUnit: sunHour,
       finalTime: finalTime,
+      lagCalculation: lagCalculation,
       description: description,
     };
   }
@@ -321,6 +592,10 @@ export type {
   MachineTime,
   AncientBurmeseTime,
   SunHourUnit,
+  AstronomicalPosition,
+  LocalLagStage,
+  AyanaAmsa,
+  LagCalculationResult,
   LMTOffset,
   TimeConversionResult,
 };
