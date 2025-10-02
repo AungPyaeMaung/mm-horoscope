@@ -1,10 +1,9 @@
 // lib/types.ts
 
-// Input from the user
 export interface BirthInfo {
-  date: number;
-  month: number;
   year: number;
+  month: number;
+  date: number;
   hours: number; // 1-12
   minutes: number;
   seconds: number;
@@ -22,7 +21,6 @@ export interface LocationInfo {
   };
 }
 
-// Ancient Burmese Time Units
 export interface BurmeseTime {
   nari: number;
   vizana: number;
@@ -33,24 +31,20 @@ export interface BurmeseTime {
   tadanukhara: number;
 }
 
-// Data structure for the first formula (Lagna Ranges)
-export interface LagnaRange {
-  sign: string;
-  from: BurmeseTime;
-  to: BurmeseTime;
-}
-
-// Data structure for the second formula (Increments)
-export interface LagnaIncrement {
-  sign: string;
-  increment: BurmeseTime;
-}
-
-// Final Result
 export interface AsuddhaLagna {
   rasi: string;
   amsa: number;
   litta: number;
   vilitta: number;
   anulitta: number;
+}
+
+export interface LagnaRangeData {
+  lat: number;
+  endTimes: { [key: string]: number }; // Sign -> total vizanas
+}
+
+export interface LagnaIncrementData {
+  lat: number;
+  increments: { [key: string]: number }; // Sign -> total kharas
 }
